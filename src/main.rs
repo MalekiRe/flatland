@@ -1,9 +1,11 @@
-use anyhow::{anyhow, Result};
+use std::fs::{File, OpenOptions};
+use anyhow::{anyhow, Error, Result};
 use flatland::Flatland;
 use input_window::InputWindow;
 use manifest_dir_macros::directory_relative_path;
 use stardust_xr_molecules::fusion::client::Client;
 use std::thread;
+use directories::ProjectDirs;
 use tokio::{runtime::Handle, sync::oneshot};
 use winit::{event_loop::EventLoopBuilder, platform::unix::EventLoopBuilderExtUnix};
 
@@ -13,6 +15,7 @@ pub mod input_window;
 pub mod panel_ui;
 // pub mod resize_handle;
 pub mod util;
+pub mod key_shortcuts;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
@@ -59,4 +62,16 @@ async fn main() -> Result<()> {
 	winit_thread.join().expect("Couldn't rejoin winit thread")?;
 
 	result
+}
+
+pub fn create_or_get_config_file() -> Result<File> {
+	let project_dirs = ProjectDirs::from("", "", "flatland").expect("Error trying to get config directory");
+	if !project_dirs.config_dir().exists() {
+		std::fs::create_dir(project_dirs.config_dir())?;
+		if !project_dirs.config_dir().join("config.kdl").exists() {
+			let file = OpenOptions::new().read(true).write(true).create(true).open(project_dirs.config_dir().join("config.kdl"))?;
+			return Ok(file);
+		}
+	}
+	Err(Error::msg("unable to create config file"))
 }

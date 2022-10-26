@@ -1,9 +1,10 @@
 use crate::flatland::Flatland;
-use anyhow::Result;
+use anyhow::{Error, Result};
 use mint::Vector2;
 use parking_lot::Mutex;
 use softbuffer::GraphicsContext;
 use std::{mem::ManuallyDrop, sync::Arc};
+use std::fs::File;
 use winit::{
 	dpi::{LogicalPosition, PhysicalPosition, Size},
 	event::{
@@ -20,18 +21,31 @@ use xkbcommon::xkb::{
 	x11::{get_core_keyboard_device_id, keymap_new_from_device},
 	Keymap, KEYMAP_COMPILE_NO_FLAGS, KEYMAP_FORMAT_TEXT_V1,
 };
+use crate::create_or_get_config_file;
+use crate::key_shortcuts::{keyboard_shortcuts, KeyboardShortcuts, PersistentKeyState};
 
 const RADIUS: u32 = 8;
 pub struct InputWindow {
-	flatland: Arc<Mutex<Flatland>>,
+	pub(crate) flatland: Arc<Mutex<Flatland>>,
 	graphics_context: GraphicsContext<Window>,
 	cursor_position: Option<LogicalPosition<u32>>,
 	grabbed: bool,
 	modifiers: ModifiersState,
 	keymap: Keymap,
+	pub(crate) persistent_key_state: PersistentKeyState,
+	pub(crate) config_file: (File, KeyboardShortcuts),
 }
 impl InputWindow {
 	pub fn new(event_loop: &EventLoop<()>, flatland: Arc<Mutex<Flatland>>) -> Result<Self> {
+		let mut config_file = create_or_get_config_file()?;
+		let keyboard_shortcuts = match KeyboardShortcuts::new(&mut config_file) {
+			None => {
+				return Err(Error::msg("Unable to load config file"))
+			}
+			Some(keyboard_shortcuts) => {
+				keyboard_shortcuts
+			}
+		};
 		let size = Size::Logical([512, 512].into());
 		let window = WindowBuilder::new()
 			.with_title("Flatland")
@@ -68,6 +82,8 @@ impl InputWindow {
 			grabbed: true,
 			modifiers: ModifiersState::empty(),
 			keymap,
+			persistent_key_state: PersistentKeyState(vec![]),
+			config_file: (config_file, keyboard_shortcuts),
 		};
 		input_window.set_grab(false);
 
@@ -203,7 +219,13 @@ impl InputWindow {
 				item.keyboard_key_state(input.scancode, input.state == ElementState::Pressed)
 					.unwrap();
 			});
+			if let Some(focused) = self.flatland.lock().focused.clone().upgrade() {
+				focused.lock().item.with_node(|panel_item| {
+					panel_item.resize(3000, 3000).unwrap();
+				});
+			}
 		}
+		keyboard_shortcuts(self, input);
 	}
 
 	const GRABBED_WINDOW_TITLE: &'static str = "Flatland Input (ctrl+esc to release cursor)";
